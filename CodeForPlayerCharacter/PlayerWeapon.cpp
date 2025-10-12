@@ -1,6 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
-
 #include "PlayerWeapon.h"
 #include "PlayerCharacter.h"
 #include "BasicEnemy.h"
@@ -62,3 +59,4 @@ void APlayerWeapon::DisableOverlapReaction()
 		UE_LOG(LogTemp, Log, TEXT("Overlap reaction disabled"));
 	}
 }
+
