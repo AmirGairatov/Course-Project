@@ -94,7 +94,7 @@ void APlayerCharacter::BeginPlay()
 
 	if (StatsBarWidgetClass)
 	{
-		// Создаём экземпляр виджета
+		// Г‘Г®Г§Г¤Г ВёГ¬ ГЅГЄГ§ГҐГ¬ГЇГ«ГїГ° ГўГЁГ¤Г¦ГҐГІГ 
 		UUStatsWidget* CreatedWidget = CreateWidget<UUStatsWidget>(GetWorld(), StatsBarWidgetClass);
 		if (CreatedWidget)
 		{
@@ -103,7 +103,7 @@ void APlayerCharacter::BeginPlay()
 
 			UE_LOG(LogTemp, Log, TEXT("Stats widget created and added to viewport"));
 
-			// сразу выставим значение HP на полоске (если прогрессбар привязан)
+			// Г±Г°Г Г§Гі ГўГ»Г±ГІГ ГўГЁГ¬ Г§Г­Г Г·ГҐГ­ГЁГҐ HP Г­Г  ГЇГ®Г«Г®Г±ГЄГҐ (ГҐГ±Г«ГЁ ГЇГ°Г®ГЈГ°ГҐГ±Г±ГЎГ Г° ГЇГ°ГЁГўГїГ§Г Г­)
 			if (StatsBarWidgetInstance->HealthProgressBar && StatsBarWidgetInstance->StaminaProgressBar)
 			{
 				float HealthPercent = FMath::Clamp((float)_HealthPoints / (float)HealthPoints, 0.f, 1.f);
@@ -431,7 +431,7 @@ void APlayerCharacter::OnTargetLockPressed()
 {
 	if (LockedTarget)
 	{
-		// Если уже есть цель – снимаем блокировку
+		// Г…Г±Г«ГЁ ГіГ¦ГҐ ГҐГ±ГІГј Г¶ГҐГ«Гј В– Г±Г­ГЁГ¬Г ГҐГ¬ ГЎГ«Г®ГЄГЁГ°Г®ГўГЄГі
 		LockedTarget = nullptr;
 		UE_LOG(LogTemp, Warning, TEXT("Target lock OFF"));
 	}
