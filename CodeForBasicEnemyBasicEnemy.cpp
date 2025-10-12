@@ -25,13 +25,13 @@ void ABasicEnemy::BeginPlay()
 	if (PawnSensingComponent) {
 		PawnSensingComponent->OnSeePawn.AddDynamic(this, &ABasicEnemy::OnSeePlayer);
 	}
-	// Âêëþ÷èòü ïëàâíîå îðèåíòèðîâàíèå ïî íàïðàâëåíèþ äâèæåíèÿ
+	// Ã‚ÃªÃ«Ã¾Ã·Ã¨Ã²Ã¼ Ã¯Ã«Ã Ã¢Ã­Ã®Ã¥ Ã®Ã°Ã¨Ã¥Ã­Ã²Ã¨Ã°Ã®Ã¢Ã Ã­Ã¨Ã¥ Ã¯Ã® Ã­Ã Ã¯Ã°Ã Ã¢Ã«Ã¥Ã­Ã¨Ã¾ Ã¤Ã¢Ã¨Ã¦Ã¥Ã­Ã¨Ã¿
 	GetCharacterMovement()->bOrientRotationToMovement = true;
-	// Îòêëþ÷èòü ìãíîâåííûé ïîâîðîò êîíòðîëëåðà
+	// ÃŽÃ²ÃªÃ«Ã¾Ã·Ã¨Ã²Ã¼ Ã¬Ã£Ã­Ã®Ã¢Ã¥Ã­Ã­Ã»Ã© Ã¯Ã®Ã¢Ã®Ã°Ã®Ã² ÃªÃ®Ã­Ã²Ã°Ã®Ã«Ã«Ã¥Ã°Ã 
 	GetCharacterMovement()->bUseControllerDesiredRotation = false;
 	bUseControllerRotationYaw = false;
 
-	// Íàñòðîéêà ñêîðîñòè âðàùåíèÿ (÷åì ìåíüøå, òåì ïëàâíåå)
+	// ÃÃ Ã±Ã²Ã°Ã®Ã©ÃªÃ  Ã±ÃªÃ®Ã°Ã®Ã±Ã²Ã¨ Ã¢Ã°Ã Ã¹Ã¥Ã­Ã¨Ã¿ (Ã·Ã¥Ã¬ Ã¬Ã¥Ã­Ã¼Ã¸Ã¥, Ã²Ã¥Ã¬ Ã¯Ã«Ã Ã¢Ã­Ã¥Ã¥)
 	GetCharacterMovement()->RotationRate = FRotator(0.f, 240.f, 0.f);
 
     if (HealthBarWidget)
