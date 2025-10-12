@@ -1,6 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
-
 #include "BasicEnemyController.h"
 #include "Math/UnrealMathUtility.h"
 #include "BasicEnemy.h"
@@ -32,4 +29,5 @@ void ABasicEnemyController::MakeAttackDecision(APawn* targetPawn)
             break;
         }
 	}
+
 }
