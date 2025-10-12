@@ -1,6 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
-
 #include "BasicEnemy.h"
 #include "Perception/PawnSensingComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -270,4 +267,5 @@ void ABasicEnemy::OnStatsChanged()
         healthBar->HealthProgressBar->SetPercent(HealthPercent);
     }
 }
+
 
