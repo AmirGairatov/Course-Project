@@ -1,6 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
-
 #include "PlayerCharacter.h"
 #include "Engine/LocalPlayer.h"
 #include "Camera/CameraComponent.h"
@@ -94,7 +91,6 @@ void APlayerCharacter::BeginPlay()
 
 	if (StatsBarWidgetClass)
 	{
-		// Ñîçäà¸ì ýêçåìïëÿð âèäæåòà
 		UUStatsWidget* CreatedWidget = CreateWidget<UUStatsWidget>(GetWorld(), StatsBarWidgetClass);
 		if (CreatedWidget)
 		{
@@ -103,7 +99,6 @@ void APlayerCharacter::BeginPlay()
 
 			UE_LOG(LogTemp, Log, TEXT("Stats widget created and added to viewport"));
 
-			// ñðàçó âûñòàâèì çíà÷åíèå HP íà ïîëîñêå (åñëè ïðîãðåññáàð ïðèâÿçàí)
 			if (StatsBarWidgetInstance->HealthProgressBar && StatsBarWidgetInstance->StaminaProgressBar)
 			{
 				float HealthPercent = FMath::Clamp((float)_HealthPoints / (float)HealthPoints, 0.f, 1.f);
@@ -128,7 +123,7 @@ void APlayerCharacter::Tick(float DeltaTime)
 	animInst->Speed = FMath::FInterpTo(animInst->Speed, TargetSpeed, DeltaTime, 8.0f);
 
 	// Calculate direction
-	if (Velocity.SizeSquared() > 0.0f) // Only calculate direction if moving
+	if (Velocity.SizeSquared() > 0.0f)
 	{
 		// Get the controller's yaw rotation to determine forward direction
 		const FRotator ControlRotation = Controller ? Controller->GetControlRotation() : FRotator::ZeroRotator;
@@ -140,8 +135,8 @@ void APlayerCharacter::Tick(float DeltaTime)
 
 		// Calculate the angle between forward vector and movement direction
 		float DotProduct = FVector::DotProduct(ForwardVector, MovementDirection);
-		float Angle = FMath::Acos(DotProduct); // Angle in radians
-		Angle = FMath::RadiansToDegrees(Angle); // Convert to degrees
+		float Angle = FMath::Acos(DotProduct); 
+		Angle = FMath::RadiansToDegrees(Angle);
 
 		// Determine if the movement is to the left or right using the cross product
 		FVector CrossProduct = FVector::CrossProduct(ForwardVector, MovementDirection);
@@ -149,13 +144,10 @@ void APlayerCharacter::Tick(float DeltaTime)
 		{
 			Angle = -Angle; // Negative angle for left side
 		}
-
-		// Set the direction in the animation instance
 		animInst->Direction = Angle;
 	}
 	else
 	{
-		// If not moving, set direction to 0
 		animInst->Direction = 0.0f;
 	}
 
@@ -431,7 +423,6 @@ void APlayerCharacter::OnTargetLockPressed()
 {
 	if (LockedTarget)
 	{
-		// Åñëè óæå åñòü öåëü  ñíèìàåì áëîêèðîâêó
 		LockedTarget = nullptr;
 		UE_LOG(LogTemp, Warning, TEXT("Target lock OFF"));
 	}
@@ -540,3 +531,4 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
 		AddControllerPitchInput(LookAxisVector.Y);
 	}
 }
+
