@@ -1,5 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -16,3 +14,4 @@ class COURSEPROJECT_API ABasicEnemyController : public AAIController
 public:
 	void MakeAttackDecision(APawn* targetPawn);
 };
+
