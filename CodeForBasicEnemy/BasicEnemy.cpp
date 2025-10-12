@@ -25,13 +25,10 @@ void ABasicEnemy::BeginPlay()
 	if (PawnSensingComponent) {
 		PawnSensingComponent->OnSeePawn.AddDynamic(this, &ABasicEnemy::OnSeePlayer);
 	}
-	// Âêëþ÷èòü ïëàâíîå îðèåíòèðîâàíèå ïî íàïðàâëåíèþ äâèæåíèÿ
 	GetCharacterMovement()->bOrientRotationToMovement = true;
-	// Îòêëþ÷èòü ìãíîâåííûé ïîâîðîò êîíòðîëëåðà
 	GetCharacterMovement()->bUseControllerDesiredRotation = false;
 	bUseControllerRotationYaw = false;
 
-	// Íàñòðîéêà ñêîðîñòè âðàùåíèÿ (÷åì ìåíüøå, òåì ïëàâíåå)
 	GetCharacterMovement()->RotationRate = FRotator(0.f, 240.f, 0.f);
 
     if (HealthBarWidget)
@@ -273,3 +270,4 @@ void ABasicEnemy::OnStatsChanged()
         healthBar->HealthProgressBar->SetPercent(HealthPercent);
     }
 }
+
