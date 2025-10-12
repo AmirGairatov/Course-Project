@@ -160,7 +160,7 @@ public:
 	TSubclassOf<UUserWidget> StatsBarWidgetClass;
 
 
-	// указатель на созданный экземпляр
+	// ГіГЄГ Г§Г ГІГҐГ«Гј Г­Г  Г±Г®Г§Г¤Г Г­Г­Г»Г© ГЅГЄГ§ГҐГ¬ГЇГ«ГїГ°
 	UPROPERTY()
 	UUStatsWidget* StatsBarWidgetInstance;
 
