@@ -1,7 +1,12 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
 #pragma once
+
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Character.h"
+#include "Sound/SoundCue.h"
+#include "NiagaraSystem.h"
 #include "PlayerWeapon.generated.h"
 
 UCLASS()
@@ -26,6 +31,11 @@ protected:
 	UFUNCTION()
 	void OnWeaponBeginOverlap(AActor* OverlappedActor, AActor* OtherActor);
 
+	UPROPERTY(EditAnywhere, Category = "Audio")
+	USoundCue* GolemHitSoundCue;
+
+	UPROPERTY(EditAnywhere, Category = "Audio")
+	USoundCue* HumanHitSoundCue;
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
@@ -40,4 +50,3 @@ public:
 
 
 };
-
