@@ -8,6 +8,8 @@
 #include "PlayerWeapon.h"
 #include "UStatsWidget.h"
 #include "BasicEnemy.h"
+#include "YouDiedWidget.h" 
+#include "Explosion.h"
 #include "PlayerCharacter.generated.h"
 
 
@@ -49,16 +51,25 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
 	UAnimMontage* m_pHealMontage;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+	UNiagaraSystem* BuffEffectNiagara;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+	UNiagaraSystem* SwordBuffEffectNiagara;
+
 	void OnRollPressed();
 
 	void OnAttackPressed();
 
+	void OnSpecialAttackPressed();
+
 	void OnHealPressed();
+
 
 	bool bIsDodging = false;
 
-	bool bIsHealing = false;
 
+	bool bIsGamePaused = false;
 
 	int ComboAttackIndex = 0;
 	/** Called for movement input */
@@ -78,18 +89,62 @@ public:
 	// Sets default values for this character's properties
 	APlayerCharacter();
 
-	bool bIsAttacking = false;
+	UFUNCTION()
+	void ActivateBuff();
+
+	bool bIsBuffed = false;
+	bool bIsAttacking = true;
+
+	bool bIsInvulnerable = false;
+
+	bool bIsHit = false;	
+
+	bool bIsHealing = false;
+
+	bool bIsFalling = false;
+
+	bool bIsInFallRecover = false;
+
+	bool bIsInRespawnProcess = false;
+
+	bool bHasRespawnBuff = false;
 
 	/** Returns CameraBoom subobject **/
 	FORCEINLINE USpringArmComponent* GetCameraBoom() const { return _springArmComponent; }
 	/** Returns FollowCamera subobject **/
 	FORCEINLINE UCameraComponent* GetFollowCamera() const { return _cameraComponent; }
 
+	UFUNCTION(BlueprintCallable)
+	void OnPausePressed();
+
+	UFUNCTION()
+	void RespawnBuff();
+
+	UPROPERTY(EditDefaultsOnly, Category = "Buffs")
+	TSubclassOf<AExplosion> ExplosionBlueprintClass;
+
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 
-	UClass* _WeaponClass;
+
+	UPROPERTY(EditAnywhere, Category = "UI")
+	TSubclassOf<UYouDiedWidget> YouDiedWidgetClass;
+
+	UPROPERTY()
+	UYouDiedWidget* YouDiedWidget = nullptr;
+
+	UPROPERTY(EditAnywhere, Category = "UI")
+	TSubclassOf<UUserWidget> PauseWidgetClass;
+
+	UPROPERTY()
+	UUserWidget* PauseWidget = nullptr;
+
+	FTimerHandle TimerHandle_FadeOut;
+	FTimerHandle TimerHandle_Respawn;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Weapon")
+	TSubclassOf<APlayerWeapon> _WeaponClass;
 	APlayerWeapon* _Weapon;
 
 	int _HealthPoints;
@@ -97,11 +152,12 @@ protected:
 	float _AttackCountingDown;
 	float _HealCountingDown;
 	float _RollCountingDown = 0;
+	float _HitCountingDown = 0;
 
 	void DieProcess();
 
 	UPROPERTY()
-	ABasicEnemy* LockedTarget;
+	ACharacter* LockedTarget;
 
 	UPROPERTY(EditAnywhere, Category = "Target Lock")
 	float TargetLockRadius = 1500.f;
@@ -111,18 +167,24 @@ protected:
 
 	void OnTargetLockPressed();
 
-	ABasicEnemy* FindBestTarget();
+	ACharacter* FindBestTarget();
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
-
+	int _HealItems;
 	UPROPERTY(EditAnywhere, Category="PlayerCharacter params")
 	int HealthPoints = 500;
 
+	bool bIsInHitAnimation = false;
+	UPROPERTY(EditAnywhere, Category = "PlayerCharacter params")
+	int Damage = 100;
 
 	UPROPERTY(EditAnywhere, Category = "PlayerCharacter params")
-	int StaminaPoints = 200;
+	int MaxHealItems = 5;
+
+	UPROPERTY(EditAnywhere, Category = "PlayerCharacter params")
+	int StaminaPoints = 150;
 
 	UPROPERTY(EditAnywhere, Category = "PlayerCharacter params")
 	float AttackRange = 6.0f;
@@ -131,10 +193,17 @@ public:
 	float AttackInterval = 1.0f;
 
 	UPROPERTY(EditAnywhere, Category = "PlayerCharacter params")
-	float RollInterval = 1.15f;
+	float SpecialAttackInterval = 3.3f;
 
 	UPROPERTY(EditAnywhere, Category = "PlayerCharacter params")
-	float HealInterval = 1.41f;
+	float RollInterval = 1.0f;
+
+	UPROPERTY(EditAnywhere, Category = "PlayerCharacter params")
+	float HealInterval = 1.8f;
+
+
+	UPROPERTY(EditAnywhere, Category = "PlayerCharacter params")
+	float HitInterval = 0.78f;
 
 	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter", meta = (DisplayName="Get HP"))
 	int GetHealthPoints();
@@ -149,20 +218,49 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "PlayerCharacter")
 	int GetComboIndex();
 
+	int GetPlayerDamage();
+
+	int GetCurrentHealItems();
+
 	UFUNCTION()
 	void HandleOnMontageNotifyIvents(FName a_MotifyName, const FBranchingPointNotifyPayload& a_BranchingPayload);
 
 	UFUNCTION()
 	void OnStatsChanged();
 
+	UFUNCTION()
+	void OnHealItemsChanged();
+
+	UFUNCTION()
+	void OnTimerChanged(int32 minutes, int32 seconds);
+
+	UFUNCTION()
+	int InWhichLocation();
+
+	void GiveHeal(int amount);
+
 	UPROPERTY(EditAnywhere, Category = "UI")
 	TSubclassOf<UUserWidget> StatsBarWidgetClass;
 
+	bool bIsDead = false;
 
-	// óêàçàòåëü íà ñîçäàííûé ýêçåìïëÿð
+	UFUNCTION()
+	void ChangeWeaponSocket();
+
 	UPROPERTY()
 	UUStatsWidget* StatsBarWidgetInstance;
 
-	void Hit(int damage);
-};
+	void Hit(int damage, bool IsHeavyHit, const FVector& HitOrigin);
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VFX")
+	UNiagaraSystem* HitEffectNiagara;
+
+
+	void ShowYouDiedWidget();
+
+	void HideYouDiedWidget();
+
+	void Die();
+
+	void PerformRespawn();
+};
