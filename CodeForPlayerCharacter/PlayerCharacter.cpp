@@ -1,3 +1,6 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
+
 #include "PlayerCharacter.h"
 #include "Engine/LocalPlayer.h"
 #include "Camera/CameraComponent.h"
@@ -11,6 +14,8 @@
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 #include "PlayerAnimInstance.h"
+#include "NiagaraFunctionLibrary.h"
+#include "CourseProjectGameMode.h"
 // Sets default values
 APlayerCharacter::APlayerCharacter()
 {
@@ -21,7 +26,7 @@ APlayerCharacter::APlayerCharacter()
 	//_springArmComponent->SetUsingAbsoluteRotation(true);
 	_springArmComponent->TargetArmLength = 400.f;
 	_springArmComponent->bUsePawnControlRotation = true;
-	
+	_springArmComponent->bDoCollisionTest = true;
 	_cameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	_cameraComponent->SetupAttachment(_springArmComponent, USpringArmComponent::SocketName); // Attach the camera to the end of the boom and let the boom adjust to match the controller orientation
 	_cameraComponent->bUsePawnControlRotation = false; // Camera does not rotate relative to arm
@@ -42,9 +47,16 @@ APlayerCharacter::APlayerCharacter()
 	characterMovement->BrakingDecelerationFalling = 1500.0f;
 
 	//Weapon
-	static ConstructorHelpers::FObjectFinder<UBlueprint> blueprint_finder (TEXT("Blueprint'/Game/ThirdPerson/Blueprints/BP_PlayerWeapon.BP_PlayerWeapon'"));
-
-	_WeaponClass = (UClass*)blueprint_finder.Object->GeneratedClass;
+	static ConstructorHelpers::FClassFinder<APlayerWeapon> WeaponClassFinder(TEXT("/Game/ThirdPerson/Blueprints/BP_PlayerWeapon"));
+	if (WeaponClassFinder.Succeeded())
+	{
+		_WeaponClass = WeaponClassFinder.Class;
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Failed to find BP_PlayerWeapon class!"));
+		_WeaponClass = APlayerWeapon::StaticClass(); 
+	}
 
 }
 
@@ -62,9 +74,17 @@ void APlayerCharacter::HandleOnMontageNotifyIvents(FName a_MotifyName, const FBr
 		}
 		else
 		{
-			_HealthPoints += 50;
+			_HealthPoints += 200;
 		}
 		OnStatsChanged();
+	}
+	if (a_MotifyName.ToString() == "Invulnerable")
+	{
+		bIsInvulnerable = true;
+	}
+	else if (a_MotifyName.ToString() == "NotInvulnerable")
+	{
+		bIsInvulnerable = false;
 	}
 	if (a_MotifyName.ToString() == "Heal")
 	{
@@ -76,18 +96,22 @@ void APlayerCharacter::HandleOnMontageNotifyIvents(FName a_MotifyName, const FBr
 void APlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
 	UAnimInstance* AnimInst = GetMesh()->GetAnimInstance();
-	_HealthPoints = HealthPoints - 200;
+	_HealthPoints = HealthPoints;
 	_StaminaPoints = StaminaPoints;
+	_HealItems = MaxHealItems;
 	if (AnimInst != nullptr)
 	{
 		AnimInst->OnPlayMontageNotifyBegin.AddDynamic(this, &APlayerCharacter::HandleOnMontageNotifyIvents);
 	}
-
 	_Weapon = Cast<APlayerWeapon>(GetWorld()->SpawnActor(_WeaponClass));
-	_Weapon->Holder = this;
-	_Weapon->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, FName("hand_rSocket"));
-	_Weapon->DisableOverlapReaction();
+	if (_Weapon)
+	{
+		_Weapon->Holder = this;
+		_Weapon->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, FName("lowerarm_lSocket"));
+		_Weapon->DisableOverlapReaction();
+	}
 
 	if (StatsBarWidgetClass)
 	{
@@ -98,16 +122,12 @@ void APlayerCharacter::BeginPlay()
 			StatsBarWidgetInstance->AddToViewport();
 
 			UE_LOG(LogTemp, Log, TEXT("Stats widget created and added to viewport"));
-
-			if (StatsBarWidgetInstance->HealthProgressBar && StatsBarWidgetInstance->StaminaProgressBar)
-			{
-				float HealthPercent = FMath::Clamp((float)_HealthPoints / (float)HealthPoints, 0.f, 1.f);
-				float StaminaPercent = FMath::Clamp((float)_StaminaPoints / (float)StaminaPoints, 0.f, 1.f);
-				StatsBarWidgetInstance->HealthProgressBar->SetPercent(HealthPercent);
-				StatsBarWidgetInstance->StaminaProgressBar->SetPercent(StaminaPercent);
-			}
+			OnStatsChanged();
+			OnHealItemsChanged();
 		}
 	}
+
+
 }
 
 
@@ -121,9 +141,25 @@ void APlayerCharacter::Tick(float DeltaTime)
 	FVector Velocity = GetCharacterMovement()->Velocity;
 	float TargetSpeed = Velocity.Size();
 	animInst->Speed = FMath::FInterpTo(animInst->Speed, TargetSpeed, DeltaTime, 8.0f);
-
+	if (GetCharacterMovement()->IsFalling() && !bIsFalling && !bIsDodging && !bIsHit)
+	{
+		if (animInst)
+		{
+			bIsFalling = true;
+			animInst->State = EPlayerState::Fall;
+		}
+	}
+	else if (!GetCharacterMovement()->IsFalling() && bIsFalling && !bIsInFallRecover && !bIsDodging)
+	{
+		if (animInst)
+		{
+			bIsFalling = false;
+			bIsInFallRecover = true;
+			animInst->State = EPlayerState::Land;
+		}
+	}
 	// Calculate direction
-	if (Velocity.SizeSquared() > 0.0f)
+	if (Velocity.SizeSquared() > 0.0f) // Only calculate direction if moving
 	{
 		// Get the controller's yaw rotation to determine forward direction
 		const FRotator ControlRotation = Controller ? Controller->GetControlRotation() : FRotator::ZeroRotator;
@@ -135,22 +171,31 @@ void APlayerCharacter::Tick(float DeltaTime)
 
 		// Calculate the angle between forward vector and movement direction
 		float DotProduct = FVector::DotProduct(ForwardVector, MovementDirection);
-		float Angle = FMath::Acos(DotProduct); 
-		Angle = FMath::RadiansToDegrees(Angle);
+		float Angle = FMath::Acos(DotProduct); // Angle in radians
+		Angle = FMath::RadiansToDegrees(Angle); // Convert to degrees
 
 		// Determine if the movement is to the left or right using the cross product
 		FVector CrossProduct = FVector::CrossProduct(ForwardVector, MovementDirection);
 		if (CrossProduct.Z < 0.0f)
 		{
-			Angle = -Angle; // Negative angle for left side
+			Angle = -Angle; 
 		}
+
 		animInst->Direction = Angle;
 	}
 	else
 	{
 		animInst->Direction = 0.0f;
 	}
-
+	if (_HitCountingDown > 0.0f)
+	{
+		_HitCountingDown -= DeltaTime;
+		if (_HitCountingDown <= 0)
+		{
+			bIsHit = false;
+		}
+	}
+	
 	if (_RollCountingDown > 0.0f)
 	{
 		_RollCountingDown -= DeltaTime;
@@ -171,7 +216,7 @@ void APlayerCharacter::Tick(float DeltaTime)
 	}
 	if (_StaminaPoints < StaminaPoints && !bIsAttacking && !bIsDodging)
 	{
-		_StaminaPoints += 0.7f;
+		_StaminaPoints += 1.1f;
 		OnStatsChanged();
 
 	}
@@ -231,7 +276,7 @@ void APlayerCharacter::Tick(float DeltaTime)
 
 void APlayerCharacter::OnAttackPressed()
 {
-	if (CanAttack() && !bIsDodging && !bIsAttacking && !bIsHealing)
+	if (CanAttack() && !bIsDodging && !bIsAttacking && !bIsHealing && !bIsHit && !bIsFalling && !bIsInFallRecover && !bIsInRespawnProcess)
 	{
 		UPlayerAnimInstance* animInst = Cast<UPlayerAnimInstance>(GetMesh()->GetAnimInstance());
 		if (animInst != nullptr)
@@ -264,16 +309,16 @@ void APlayerCharacter::OnAttackPressed()
 	}
 	else
 	{
-		if (ComboAttackIndex == 0)
+		if (ComboAttackIndex == 0 )
 		{
-			if (!bIsDodging && _StaminaPoints >= 20  && !bIsHealing && (_AttackCountingDown >0.2f && _AttackCountingDown < 0.7f))
+			if (!bIsDodging && _StaminaPoints >= 20 && !bIsHit && !bIsHealing && (_AttackCountingDown >0.2f && _AttackCountingDown < 0.7f))
 			{
 				ComboAttackIndex = 1;
 			}
 		}
 		if (ComboAttackIndex == 2)
 		{
-			if (!bIsDodging && _StaminaPoints >= 20 && !bIsHealing && (_AttackCountingDown > 0.2f && _AttackCountingDown < 0.7f))
+			if (!bIsDodging && _StaminaPoints >= 20 && !bIsHit && !bIsHealing && (_AttackCountingDown > 0.2f && _AttackCountingDown < 0.7f))
 			{
 				ComboAttackIndex = 3;
 			}
@@ -292,6 +337,24 @@ void APlayerCharacter::OnStatsChanged()
 	}
 }
 
+void APlayerCharacter::OnHealItemsChanged()
+{
+	if (StatsBarWidgetInstance->HealthKitCountText)
+	{
+		StatsBarWidgetInstance->HealthKitCountText->SetText(FText::AsNumber(_HealItems));
+	}
+}
+void APlayerCharacter::OnTimerChanged(int32 minutes, int32 seconds)
+{
+	if (StatsBarWidgetInstance->TimerText)
+	{
+		FString TimeString = FString::Printf(TEXT("%02d:%02d"), minutes, seconds);
+
+		FText TimeText = FText::FromString(TimeString);
+
+		StatsBarWidgetInstance->TimerText->SetText(TimeText);
+	}
+}
 // Called to bind functionality to input
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
@@ -313,6 +376,50 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 	InputComponent->BindAction("Heal", IE_Pressed, this, &APlayerCharacter::OnHealPressed);
 
 	InputComponent->BindAction("LockTarget", IE_Pressed, this, &APlayerCharacter::OnTargetLockPressed);
+
+	InputComponent->BindAction("SpecialAttack", IE_Pressed, this, &APlayerCharacter::OnSpecialAttackPressed);
+
+	InputComponent->BindAction("Pause", IE_Pressed, this, &APlayerCharacter::OnPausePressed);
+}
+
+void APlayerCharacter::OnPausePressed()
+{
+	UE_LOG(LogTemp, Log, TEXT("Pause"));
+	if (!PauseWidgetClass) return;
+
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC) return;
+
+	if (!bIsGamePaused)
+	{
+		UGameplayStatics::SetGamePaused(GetWorld(), true);
+		bIsGamePaused = true;
+
+		PauseWidget = CreateWidget<UUserWidget>(PC, PauseWidgetClass);
+		if (!PauseWidget) return;
+		PauseWidget->AddToViewport();
+
+		PC->bShowMouseCursor = true;
+		FInputModeUIOnly InputMode;
+		InputMode.SetWidgetToFocus(PauseWidget->TakeWidget());
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(InputMode);
+	}
+	else
+	{
+		UGameplayStatics::SetGamePaused(GetWorld(), false);
+		bIsGamePaused = false;
+
+		if (PauseWidget)
+		{
+			PauseWidget->RemoveFromParent();
+			PauseWidget = nullptr;
+		}
+
+		PC->bShowMouseCursor = false;
+		FInputModeGameOnly InputMode;
+		PC->SetInputMode(InputMode);
+	}
 }
 
 int APlayerCharacter::GetHealthPoints()
@@ -343,15 +450,104 @@ bool APlayerCharacter::CanHeal()
 	return (_HealCountingDown <= 0);
 }
 
-void APlayerCharacter::Hit(int damage)
+void APlayerCharacter::ChangeWeaponSocket()
 {
-	_HealthPoints -= damage;
+	if (_Weapon)
+	{
+		_Weapon->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, FName("hand_rSocket"));
+	}
+}
+
+void APlayerCharacter::Hit(int damage, bool IsHeavyHit, const FVector& HitOrigin)
+{
+	if (!bIsInvulnerable && !bIsDead && !bIsInRespawnProcess)
+	{
+		bIsAttacking = false;
+		bIsDodging = false;
+		_Weapon->DisableOverlapReaction();
+		_Weapon->bCanDealDamage = true;
+		ComboAttackIndex = 0;
+		bIsHit = true;
+		if (HitEffectNiagara)
+		{
+			FName HitSocketName(TEXT("FX_ChestFlame"));
+			UNiagaraFunctionLibrary::SpawnSystemAttached(
+				HitEffectNiagara,
+				GetMesh(),
+				HitSocketName,
+				FVector::ZeroVector,
+				FRotator::ZeroRotator,
+				EAttachLocation::SnapToTarget,
+				true
+			);
+		}
+		UPlayerAnimInstance* animInst = Cast<UPlayerAnimInstance>(GetMesh()->GetAnimInstance());
+		if (_HealthPoints - damage <= 0 && !bHasRespawnBuff)
+		{
+			_HealthPoints = 0;
+			OnStatsChanged();
+			Die();
+			return;
+		}
+		else if (_HealthPoints - damage <= 0 && bHasRespawnBuff)
+		{
+			_HealthPoints = 0;
+			OnStatsChanged();
+			bIsInRespawnProcess = true;
+			animInst->State = EPlayerState::RespawnBuff;
+			bHasRespawnBuff = false;
+			bIsHit = false;
+			return;
+		}
+		else
+		{
+			_HealthPoints -= damage;
+		}
+		if (IsHeavyHit && animInst->State!=EPlayerState::RecoverFromHeavyHit && animInst->State!=EPlayerState::HeavHit)
+		{
+			animInst->State = EPlayerState::HeavHit;
+			if (Controller)
+			{
+				FVector DirectionToEnemy = HitOrigin - GetActorLocation();
+				DirectionToEnemy.Z = 0.f;
+				DirectionToEnemy.Normalize();
+
+				FRotator LookAtRotation = DirectionToEnemy.Rotation();
+				SetActorRotation(LookAtRotation);
+
+				float LaunchDistance = 1400.f;
+				FVector LaunchVelocity = -DirectionToEnemy * LaunchDistance; 
+
+				LaunchCharacter(LaunchVelocity, true, false);
+			}
+		}
+		else if (animInst->State != EPlayerState::Hit && !bIsInHitAnimation && _HitCountingDown<=0.0f && animInst->State != EPlayerState::HeavHit)
+		{
+			_HitCountingDown = HitInterval;
+			bIsInHitAnimation = true;
+			animInst->State = EPlayerState::Hit;
+
+		}
+		//else if (_HealCountingDown<=0)
+		//{
+		//	//animInst->State = EPlayerState::Hit;
+		//	_HitCountingDown = HitInterval;
+		//}
+		if (bIsDodging)
+		{
+			animInst->Montage_Stop(0.1);
+			bIsDodging = false;
+		}
+
+		OnStatsChanged();
+	}
+
 }
 
 
 void APlayerCharacter::OnRollPressed()
 {
-	if (!bIsDodging && CanRoll() && !bIsAttacking && !bIsHealing)
+	if (!bIsDodging && CanRoll() && !bIsAttacking && !bIsHealing && !bIsHit && CanHeal() && !bIsFalling && !bIsInFallRecover &&!bIsDead && !bIsInRespawnProcess)
 	{
 		UAnimInstance* AnimInst = GetMesh()->GetAnimInstance();
 		UPlayerAnimInstance* animInst = Cast<UPlayerAnimInstance>(AnimInst);
@@ -402,15 +598,32 @@ void APlayerCharacter::OnRollPressed()
 	}
 }
 
+void APlayerCharacter::GiveHeal(int amount)
+{
+	_HealItems = FMath::Min(MaxHealItems, _HealItems + amount);
+	OnHealItemsChanged();
+}
+
+int APlayerCharacter::GetPlayerDamage()
+{
+	return Damage;
+}
+
+int APlayerCharacter::GetCurrentHealItems()
+{
+	return _HealItems;
+}
 
 void APlayerCharacter::OnHealPressed()
 {
-	if (!bIsDodging && CanHeal() && !bIsAttacking && !bIsHealing)
+	if (!bIsDodging && CanHeal() && !bIsAttacking && !bIsHit && !bIsHealing && _HealItems>0 && !bIsFalling && !bIsInFallRecover && !bIsInRespawnProcess)
 	{
 		UAnimInstance* AnimInst = GetMesh()->GetAnimInstance();
 		UPlayerAnimInstance* animInst = Cast<UPlayerAnimInstance>(GetMesh()->GetAnimInstance());
 		if (AnimInst != nullptr)
 		{
+			_HealItems -= 1;
+			OnHealItemsChanged();
 			animInst->State = EPlayerState::Heal;
 			bIsHealing = true;
 			_HealCountingDown = HealInterval;
@@ -440,23 +653,44 @@ void APlayerCharacter::OnTargetLockPressed()
 	}
 }
 
-ABasicEnemy* APlayerCharacter::FindBestTarget()
+void APlayerCharacter::OnSpecialAttackPressed()
+{
+	if (CanAttack() && !bIsDodging && !bIsAttacking && !bIsHealing && !bIsHit && !bIsInFallRecover && !bIsFalling)
+	{
+		UPlayerAnimInstance* animInst = Cast<UPlayerAnimInstance>(GetMesh()->GetAnimInstance());
+		if (animInst != nullptr)
+		{
+			if (Controller)
+			{
+				FRotator ControlRotation = Controller->GetControlRotation();
+				FRotator NewRotation(0.f, ControlRotation.Yaw, 0.f);
+				SetActorRotation(NewRotation);
+			}
+			_Weapon->EnableOverlapReaction();
+			animInst->State = EPlayerState::SpecialAttack;
+			bIsAttacking = true;
+			_AttackCountingDown = SpecialAttackInterval;
+		}
+	}
+}
+
+ACharacter* APlayerCharacter::FindBestTarget()
 {
 	UWorld* World = GetWorld();
 	if (!World) return nullptr;
 
 	TArray<AActor*> FoundEnemies;
-	UGameplayStatics::GetAllActorsOfClass(World, ABasicEnemy::StaticClass(), FoundEnemies);
+	UGameplayStatics::GetAllActorsOfClass(World, ACharacter::StaticClass(), FoundEnemies);
 
 	FVector MyLocation = GetActorLocation();
 	FVector Forward = GetFollowCamera() ? GetFollowCamera()->GetForwardVector() : GetActorForwardVector();
 
-	ABasicEnemy* BestTarget = nullptr;
+	ACharacter* BestTarget = nullptr;
 	float BestScore = FLT_MAX;
 
 	for (AActor* Actor : FoundEnemies)
 	{
-		ABasicEnemy* Enemy = Cast<ABasicEnemy>(Actor);
+		ACharacter* Enemy = Cast<ACharacter>(Actor);
 		if (!Enemy) continue;
 
 		FVector ToEnemy = Enemy->GetActorLocation() - MyLocation;
@@ -491,12 +725,179 @@ void APlayerCharacter::NotifyControllerChanged()
 	}
 }
 
+void APlayerCharacter::ShowYouDiedWidget()
+{
+	UE_LOG(LogTemp, Log, TEXT("You Died"));
+	if (!YouDiedWidgetClass) return;
+
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		YouDiedWidget = CreateWidget<UYouDiedWidget>(PC, YouDiedWidgetClass);
+		if (!YouDiedWidget) return;
+		YouDiedWidget->AddToViewport();
+
+
+			YouDiedWidget->PlayAnimation(YouDiedWidget->FadeInAnimation);
+		
+
+		GetWorldTimerManager().SetTimer(TimerHandle_FadeOut, this, &APlayerCharacter::PerformRespawn, 2.0f, false);
+	}
+}
+
+void APlayerCharacter::HideYouDiedWidget()
+{
+	if (!YouDiedWidget) return;
+	if (YouDiedWidget->FadeOutAnimation)
+	{
+		YouDiedWidget->PlayAnimation(YouDiedWidget->FadeOutAnimation);
+		UE_LOG(LogTemp, Log, TEXT("FadeOut"));
+		FTimerHandle RemoveHandle;
+		GetWorldTimerManager().SetTimer(RemoveHandle, [this]()
+			{
+				if (YouDiedWidget)
+				{
+					YouDiedWidget->RemoveFromParent();
+					YouDiedWidget = nullptr;
+				}
+			}, 1.0f, false);
+	}
+	else
+	{
+		YouDiedWidget->RemoveFromParent();
+		YouDiedWidget = nullptr;
+	}
+}
+
+void APlayerCharacter::Die()
+{
+	if (bIsDead) return;
+	bIsDead = true;
+
+	UPlayerAnimInstance* animInst = Cast<UPlayerAnimInstance>(GetMesh()->GetAnimInstance());
+	if (animInst)
+	{
+		animInst->State = EPlayerState::Die;
+	}
+
+
+}
+
+void APlayerCharacter::RespawnBuff()
+{
+	if (ExplosionBlueprintClass)
+	{
+		FVector SpawnLocation = GetActorLocation();
+		FRotator SpawnRotation = GetActorRotation();
+
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.Owner = this;
+		SpawnParams.Instigator = GetInstigator();
+
+		GetWorld()->SpawnActor<AExplosion>(ExplosionBlueprintClass, SpawnLocation, SpawnRotation, SpawnParams);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("ExplosionBlueprintClass isn't setup!"));
+	}
+	_HealthPoints = 500;
+	OnStatsChanged();
+}
+
+void APlayerCharacter::ActivateBuff()
+{
+	if (BuffEffectNiagara && GetMesh())
+	{
+		FName SocketRName(TEXT("FX_Trail_R"));
+		UNiagaraFunctionLibrary::SpawnSystemAttached(
+			BuffEffectNiagara,
+			GetMesh(),
+			SocketRName,
+			FVector::ZeroVector,
+			FRotator::ZeroRotator,
+			EAttachLocation::SnapToTarget,
+			true
+		);
+
+		FName SocketLName(TEXT("FX_Trail_L"));
+		UNiagaraFunctionLibrary::SpawnSystemAttached(
+			BuffEffectNiagara,
+			GetMesh(),
+			SocketLName,
+			FVector::ZeroVector,
+			FRotator::ZeroRotator,
+			EAttachLocation::SnapToTarget,
+			true
+		);
+		FName SocketSName(TEXT("hand_rSocket_0"));
+		UNiagaraFunctionLibrary::SpawnSystemAttached(
+			SwordBuffEffectNiagara,
+			GetMesh(),
+			SocketSName,
+			FVector::ZeroVector,
+			FRotator::ZeroRotator,
+			EAttachLocation::SnapToTarget,
+			true
+		);
+	}
+	Damage = Damage + 50;
+}
+
+void APlayerCharacter::PerformRespawn()
+{
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC) return;
+
+	ACourseProjectGameMode* GameMode = Cast<ACourseProjectGameMode>(GetWorld()->GetAuthGameMode());
+	if (!GameMode) return;
+
+	_Weapon->Destroy();
+	if (StatsBarWidgetInstance)
+	{
+		StatsBarWidgetInstance->RemoveFromParent();
+		StatsBarWidgetInstance = nullptr;
+	}
+	Destroy();
+	FVector RespawnLocation;
+	if (InWhichLocation())
+	{
+		RespawnLocation = FVector(13474.492933f, -17617.287361f, -70.0f);
+	}
+	else
+	{
+		RespawnLocation = FVector(-16304.591487f, 18906.924007f, 2996.836762f);
+	}
+
+	FTransform SpawnTransform(RespawnLocation);
+	GameMode->RestartPlayerAtTransform(PC, SpawnTransform);
+	GameMode->RetargetAllEnemies();
+	UE_LOG(LogTemp, Warning, TEXT("Restarted"));
+
+	bIsDead = false;
+	HideYouDiedWidget();
+}
+
+int APlayerCharacter::InWhichLocation()
+{
+	FVector CurrentLocation = this->GetActorLocation();
+
+	if ((CurrentLocation.X >= 7119 && CurrentLocation.Y <= -9132)
+		|| (CurrentLocation.X >= 5129 && CurrentLocation.Y <= -2632)
+		|| (CurrentLocation.X >= 2619 && CurrentLocation.Y <= 1337)
+		||(CurrentLocation.X >= 512 && CurrentLocation.Y <= 5967)
+		|| (CurrentLocation.X >= -1370 && CurrentLocation.Y <= 11917)
+		|| (CurrentLocation.X >= -4960 && CurrentLocation.Y <= 18387))
+	{
+		//Lava Location
+		return 1;
+	}
+	return 0;
+}
 
 void APlayerCharacter::Move(const FInputActionValue& Value)
 {
 	// input is a Vector2D
 	FVector2D MovementVector = Value.Get<FVector2D>();
-	if (!bIsDodging && !bIsAttacking && !bIsHealing)
+	if (!bIsDodging && !bIsAttacking && !bIsHealing && !bIsHit && !bIsInFallRecover && !bIsDead && !bIsInRespawnProcess)
 	{
 		if (Controller != nullptr)
 		{
@@ -531,4 +932,3 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
 		AddControllerPitchInput(LookAxisVector.Y);
 	}
 }
-
