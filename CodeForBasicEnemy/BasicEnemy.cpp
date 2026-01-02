@@ -1,3 +1,6 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
+
 #include "BasicEnemy.h"
 #include "Perception/PawnSensingComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -5,13 +8,36 @@
 #include "BasicEnemyAnimInstance.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraComponent.h"
+#include "CourseProjectGameMode.h"
+#include "Kismet/GameplayStatics.h"
+#include "PlayerCharacter.h"
 
 // Sets default values
 ABasicEnemy::ABasicEnemy()
 {
- 	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
-	PrimaryActorTick.bCanEverTick = true;
-	PawnSensingComponent = CreateDefaultSubobject<UPawnSensingComponent>(TEXT("PawnSensor"));
+    PrimaryActorTick.bCanEverTick = true;
+    PawnSensingComponent = CreateDefaultSubobject<UPawnSensingComponent>(TEXT("PawnSensor"));
+
+    LeftFistCapsule = CreateDefaultSubobject<UCapsuleComponent>(TEXT("LeftFistCapsule"));
+    LeftFistCapsule->SetupAttachment(GetMesh(), TEXT("hand_l"));
+    LeftFistCapsule->SetCapsuleSize(10.f, 20.f);
+    LeftFistCapsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    LeftFistCapsule->SetCollisionObjectType(ECC_WorldDynamic);
+    LeftFistCapsule->SetCollisionResponseToAllChannels(ECR_Ignore);
+
+    RightFistCapsule = CreateDefaultSubobject<UCapsuleComponent>(TEXT("RightFistCapsule"));
+    RightFistCapsule->SetupAttachment(GetMesh(), TEXT("hand_r"));
+    RightFistCapsule->SetCapsuleSize(10.f, 20.f);
+    RightFistCapsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    RightFistCapsule->SetCollisionObjectType(ECC_WorldDynamic);
+    RightFistCapsule->SetCollisionResponseToAllChannels(ECR_Ignore);
+
+    GetCapsuleComponent()->SetCollisionProfileName(TEXT("Pawn"));
+
+    GetCharacterMovement()->bUseRVOAvoidance = true;
+    GetCharacterMovement()->AvoidanceWeight = 0.5f;
+    static int32 NextUID = 1;
+    GetCharacterMovement()->SetRVOAvoidanceUID(NextUID++);
 }
 
 // Called when the game starts or when spawned
@@ -19,8 +45,10 @@ void ABasicEnemy::BeginPlay()
 {
 	Super::BeginPlay();
 	_HealthPoints = HealthPoints;
+    UE_LOG(LogTemp, Error, TEXT("Enemy HP Set"));
 	if (PawnSensingComponent) {
 		PawnSensingComponent->OnSeePawn.AddDynamic(this, &ABasicEnemy::OnSeePlayer);
+        UE_LOG(LogTemp, Error, TEXT("PawnSensing Set"));
 	}
 	GetCharacterMovement()->bOrientRotationToMovement = true;
 	GetCharacterMovement()->bUseControllerDesiredRotation = false;
@@ -32,7 +60,17 @@ void ABasicEnemy::BeginPlay()
     {
         OnStatsChanged();
     }
+    
 
+    if (LeftFistCapsule)
+    {
+        LeftFistCapsule->OnComponentBeginOverlap.AddDynamic(this, &ABasicEnemy::OnFistBeginOverlap);
+    }
+    if (RightFistCapsule)
+    {
+        RightFistCapsule->OnComponentBeginOverlap.AddDynamic(this, &ABasicEnemy::OnFistBeginOverlap);
+    }
+    
 }
 
 // Called every frame
@@ -82,10 +120,14 @@ void ABasicEnemy::Tick(float DeltaTime)
     if (_AttackCountingDown > 0.0f)
     {
         _AttackCountingDown -= DeltaTime;
+
     }
     else
     {
         bIsAttacking = false;
+        bIsHeavyAttacking = false;
+        //EnableFistCollision(false);
+        bIsDamageDealed = false;
     }
 
     if (_ChasedTarget && !bIsAttacking)
@@ -112,16 +154,79 @@ void ABasicEnemy::Tick(float DeltaTime)
         float AngleToTarget = FMath::Abs(FRotator::NormalizeAxis(GetActorRotation().Yaw - TargetRotation.Yaw));
         constexpr float AttackAngleThreshold = 15.0f;
 
-        if (AngleToTarget < AttackAngleThreshold)
+        if (AngleToTarget < AttackAngleThreshold && !bIsInAttackRecover)
         {
             auto enemyController = Cast<ABasicEnemyController>(GetController());
             if (enemyController)
             {
-                enemyController->MakeAttackDecision(_ChasedTarget);
+                if (CanAttack())
+                {
+                    enemyController->MakeAttackDecision(_ChasedTarget);
+                }
             }
         }
     }
+
+    if (_ChasedTarget)
+    {
+        LostSightTime = 0.0f;
+    }
+    else
+    {
+        LostSightTime += DeltaTime;
+        if (LostSightTime >= 15.0f)
+        {
+            DieProcess();
+        }
+    }
+    if (_AttackRecoverCountingDown > 0.0f)
+    {
+        _AttackRecoverCountingDown -= DeltaTime;
+    }
+    else
+    {
+        bIsInAttackRecover = false;
+
+    }
 }
+
+void ABasicEnemy::ActivateBuff()
+{
+    if (BuffEffectNiagara && GetMesh())
+    {
+        FName SocketRName(TEXT("FX_Trail_R"));
+        UNiagaraFunctionLibrary::SpawnSystemAttached(
+            BuffEffectNiagara,
+            GetMesh(),
+            SocketRName,
+            FVector::ZeroVector,
+            FRotator::ZeroRotator,
+            EAttachLocation::SnapToTarget,
+            true
+        );
+
+        FName SocketLName(TEXT("FX_Trail_L"));
+        UNiagaraFunctionLibrary::SpawnSystemAttached(
+            BuffEffectNiagara,
+            GetMesh(),
+            SocketLName,
+            FVector::ZeroVector,
+            FRotator::ZeroRotator,
+            EAttachLocation::SnapToTarget,
+            true
+        );
+    }
+    BasicDamage = BasicDamage + 50;
+}
+
+void ABasicEnemy::SetAllParams(int health, int damage, float attackInterval)
+{
+    HealthPoints = health;
+    BasicDamage = damage;
+    AttackInterval = attackInterval;
+    _HealthPoints = HealthPoints;
+}
+
 bool ABasicEnemy::IsTargetInFront(float AngleThresholdDegrees) const
 {
 	if (!_ChasedTarget) return false;
@@ -151,21 +256,28 @@ bool ABasicEnemy::CanAttack()
 
 void ABasicEnemy::Chase(APawn* targetPawn)
 {
-	USkeletalMeshComponent* meshComp = GetMesh();
+    USkeletalMeshComponent* meshComp = GetMesh();
 
-	UAnimInstance* animInst = meshComp->GetAnimInstance();
-	UBasicEnemyAnimInstance* enemyAnimInst = Cast<UBasicEnemyAnimInstance>(animInst);
+    _ChasedTarget = targetPawn;
+    UAnimInstance* animInst = meshComp->GetAnimInstance();
+    UBasicEnemyAnimInstance* enemyAnimInst = Cast<UBasicEnemyAnimInstance>(animInst);
 
-	if (targetPawn && enemyAnimInst->State == EBasicEnemyState::Locomotion && !bAreHit)
-	{
-		AController* controller = GetController();
-		ABasicEnemyController* enemyController = Cast<ABasicEnemyController>(controller);
-		//UE_LOG(LogTemp, Error, TEXT("Chasing"));
-            
-		enemyController->MoveToActor(targetPawn, 90.0f);
-	}
-	
-	_ChasedTarget = targetPawn;
+    if (targetPawn && enemyAnimInst->State == EBasicEnemyState::Locomotion && !bAreHit && !bIsAttacking)
+    {
+        AController* controller = GetController();
+        ABasicEnemyController* enemyController = Cast<ABasicEnemyController>(controller);
+        //UE_LOG(LogTemp, Error, TEXT("Chasing"));
+
+        enemyController->MoveToActor(targetPawn, 70.0f, true, true, true);
+    }
+    else if (targetPawn && enemyAnimInst->State == EBasicEnemyState::Locomotion && !bAreHit)
+    {
+        AController* controller = GetController();
+        ABasicEnemyController* enemyController = Cast<ABasicEnemyController>(controller);
+        //UE_LOG(LogTemp, Error, TEXT("Chasing"));
+
+        enemyController->MoveToActor(targetPawn, 210.0f, true, true, true);
+    }
 }
 
 void ABasicEnemy::Attack()
@@ -181,14 +293,16 @@ void ABasicEnemy::AttackUP()
 void ABasicEnemy::HeavyAttack()
 {
     StartAttack(HeavyAttackInterval);
+    bIsHeavyAttacking = true;
 }
 void ABasicEnemy::StartAttack(float attackInterval)
 {
     GetController()->StopMovement();
-    bIsAttacking = true;
     auto animInst = Cast<UBasicEnemyAnimInstance>(GetMesh()->GetAnimInstance());
-    if (animInst)
+    if (animInst && !bAreHit)
     {
+        bIsAttacking = true;
+        //EnableFistCollision(true);
         if (attackInterval == AttackInterval)
         {
             animInst->State = EBasicEnemyState::Attack;
@@ -205,6 +319,50 @@ void ABasicEnemy::StartAttack(float attackInterval)
             _AttackCountingDown = HeavyAttackInterval;
         }
 
+    }
+}
+void ABasicEnemy::OnFistBeginOverlap(
+    UPrimitiveComponent* OverlappedComp,
+    AActor* OtherActor,
+    UPrimitiveComponent* OtherComp,
+    int32 OtherBodyIndex,
+    bool bFromSweep,
+    const FHitResult& SweepResult
+)
+{
+    UE_LOG(LogTemp, Log, TEXT("Player Overlapped"));
+    auto actor = Cast<APlayerCharacter>(OtherActor);
+    if (actor != nullptr && bIsAttacking && !bIsDamageDealed)
+    {
+        bIsDamageDealed = true;
+        UE_LOG(LogTemp, Log, TEXT("Hit"));
+        actor->Hit(100, bIsHeavyAttacking, GetActorLocation());
+        if (PunchCue && !actor->bIsInvulnerable && !actor->bIsDead)
+        {
+            UGameplayStatics::PlaySoundAtLocation(this, PunchCue, GetActorLocation());
+        }
+        if (actor->IsKilled())
+        {
+            _ChasedTarget = nullptr;
+        }
+    }
+}
+
+void ABasicEnemy::EnableFistCollision(bool bEnable)
+{
+    ECollisionEnabled::Type NewCollision = bEnable ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision;
+    LeftFistCapsule->SetCollisionEnabled(NewCollision);
+    RightFistCapsule->SetCollisionEnabled(NewCollision);
+
+    if (bEnable)
+    {
+        LeftFistCapsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+        RightFistCapsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+    }
+    else
+    {
+        LeftFistCapsule->SetCollisionResponseToAllChannels(ECR_Ignore);
+        RightFistCapsule->SetCollisionResponseToAllChannels(ECR_Ignore);
     }
 }
 void ABasicEnemy::Hit(int damage)
@@ -228,7 +386,10 @@ void ABasicEnemy::Hit(int damage)
             true                         
         );
     }
-
+    if (MySoundCue)
+    {
+        UGameplayStatics::PlaySoundAtLocation(this, MySoundCue, GetActorLocation());
+    }
     if (_HealthPoints <=0)
     {
 
@@ -250,12 +411,36 @@ void ABasicEnemy::DieProcess()
 	PrimaryActorTick.bCanEverTick = false;
 	K2_DestroyActor();
 	GEngine->ForceGarbageCollection(true);
+
+    UWorld* World = GetWorld();
+    if (!World) return;
+
+    ACourseProjectGameMode* GM = Cast<ACourseProjectGameMode>(UGameplayStatics::GetGameMode(World));
+    if (GM)
+    {
+        GM->OnEnemyEliminated(this);
+    }
 }
 
 void ABasicEnemy::OnSeePlayer(APawn* SensedPawn) {
-	if (SensedPawn && !IsKilled()) {
-		Chase(SensedPawn);
-	}
+    if (SensedPawn) {
+        Chase(SensedPawn);
+
+        GetWorldTimerManager().ClearTimer(LoseSightTimerHandle);
+        GetWorldTimerManager().SetTimer(
+            LoseSightTimerHandle,
+            this,
+            &ABasicEnemy::OnLosePlayer,
+            LoseSightDelay,
+            false
+        );
+    }
+}
+
+void ABasicEnemy::OnLosePlayer()
+{
+    _ChasedTarget = nullptr;
+    UE_LOG(LogTemp, Warning, TEXT("Lost sight of player, setting _ChasedTarget to nullptr"));
 }
 
 void ABasicEnemy::OnStatsChanged()
@@ -267,5 +452,3 @@ void ABasicEnemy::OnStatsChanged()
         healthBar->HealthProgressBar->SetPercent(HealthPercent);
     }
 }
-
-
